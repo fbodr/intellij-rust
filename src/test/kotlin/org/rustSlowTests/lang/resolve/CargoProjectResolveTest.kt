@@ -5,6 +5,10 @@
 
 package org.rustSlowTests.lang.resolve
 
+import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.module.ModuleUtilCore
+import com.intellij.openapi.roots.ModuleRootModificationUtil
+import com.intellij.openapi.roots.ex.ProjectRootManagerEx
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl
@@ -16,8 +20,6 @@ import org.rust.lang.core.crate.impl.CrateGraphTestmarks
 import org.rust.lang.core.psi.RsPath
 import org.rust.lang.core.resolve.NameResolutionTestmarks
 import org.rust.openapiext.pathAsPath
-import org.rustPerformanceTests.fullyRefreshDirectoryInUnitTests
-import java.nio.file.Files
 
 class CargoProjectResolveTest : RsWithToolchainTestBase() {
 
@@ -173,6 +175,8 @@ class CargoProjectResolveTest : RsWithToolchainTestBase() {
             """)
         }
 
+        symlink("foo", "foo2")
+
         dir("foo2") {
             toml("Cargo.toml", """
                 [package]
@@ -188,9 +192,8 @@ class CargoProjectResolveTest : RsWithToolchainTestBase() {
             }
         }
     }.let { fileTree ->
+        // Symlinks doesn't work on Windows CI for some reason
         if (SystemInfo.isWindows) return@let
-        val rootPath = cargoProjectDirectory.pathAsPath
-        Files.createSymbolicLink(rootPath.resolve("foo"), rootPath.resolve("foo2"))
 
         val project = fileTree.create()
         project.checkReferenceIsResolved<RsPath>("src/main.rs")
@@ -221,41 +224,51 @@ class CargoProjectResolveTest : RsWithToolchainTestBase() {
         }
     }.checkReferenceIsResolved<RsPath>("src/foo.rs")
 
-    fun `test module relations when project is under symlink`() = fileTree {
-        toml("Cargo.toml", """
-            [package]
-            name = "mods"
-            version = "0.1.0"
-            authors = []
+    fun `test module relations when cargo project is under symlink`() = fileTree {
+        symlink("foo", "symlink_target")
 
-            [dependencies]
-        """)
+        dir("symlink_target") {
+            toml("Cargo.toml", """
+                [package]
+                name = "mods"
+                version = "0.1.0"
+                authors = []
 
-        dir("src") {
-            rust("lib.rs", """
-                mod foo;
-
-                pub struct S;
+                [dependencies]
             """)
 
-            rust("foo.rs", """
-                use S;
-                  //^
-            """)
+            dir("src") {
+                rust("lib.rs", """
+                    mod foo;
+
+                    pub struct S;
+                """)
+
+                rust("foo.rs", """
+                    use S;
+                      //^
+                """)
+            }
         }
     }.let { fileTree ->
-        if (System.getenv("CI") != null) return@let  // TODO
+        // Symlinks doesn't work on Windows CI for some reason
         if (SystemInfo.isWindows) return@let
-        val rootPath = cargoProjectDirectory.pathAsPath
-        val targetName = cargoProjectDirectory.name + "_target"
-        val targetPath = rootPath.parent.resolve(targetName)
-        Files.move(rootPath, targetPath)  // moving empty directory
-        Files.createSymbolicLink(rootPath, targetPath)
 
-        fullyRefreshDirectoryInUnitTests(cargoProjectDirectory)
-        val project = fileTree.create(project, cargoProjectDirectory)
-        refreshWorkspace()
-        project.checkReferenceIsResolved<RsPath>("src/foo.rs")
+        val p = fileTree.create(project, cargoProjectDirectory)
+        project.testCargoProjects.attachCargoProject(cargoProjectDirectory.pathAsPath.resolve("foo").resolve("Cargo.toml"))
+
+        // Ensure that "symlink_target" is excluded from the index
+        runWriteAction {
+            ProjectRootManagerEx.getInstanceEx(project).mergeRootsChangesDuring {
+                val module = ModuleUtilCore.findModuleForFile(cargoProjectDirectory, project)!!
+                ModuleRootModificationUtil.updateModel(module) { rootModel ->
+                    rootModel.contentEntries.singleOrNull()!!
+                        .addExcludeFolder(FileUtil.join(cargoProjectDirectory.url, "symlink_target"))
+                }
+            }
+        }
+
+        p.checkReferenceIsResolved<RsPath>("foo/src/foo.rs")
     }
 
     fun `test kebab-case`() = buildProject {
