@@ -51,6 +51,7 @@ data class CargoCommandLine(
     val backtraceMode: BacktraceMode = BacktraceMode.DEFAULT,
     val channel: RustChannel = RustChannel.DEFAULT,
     val environmentVariables: EnvironmentVariablesData = EnvironmentVariablesData.DEFAULT,
+    val requiredFeatures: Boolean = true,
     val allFeatures: Boolean = false,
     val emulateTerminal: Boolean = false
 ) : RsCommandLineBase() {

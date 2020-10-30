@@ -2,6 +2,7 @@
   <configuration name="Run hello" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="channel" value="NIGHTLY" />
     <option name="command" value="run --package test-package --bin hello" />
+    <option name="requitedFeatures" value="false" />
     <option name="allFeatures" value="true" />
     <option name="emulateTerminal" value="true" />
     <option name="backtrace" value="FULL" />
